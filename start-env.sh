@@ -665,6 +665,31 @@ else
         http://localhost:7071/v1/admin/wallet/unlock >/dev/null 2>&1
     fi
 
+    log "Waiting for wallet to sync..."
+    max_attempts=60
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      wallet_status=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+      wallet_synced=$(echo "$wallet_status" | jq -r '.synced // false' 2>/dev/null || echo "false")
+      if [ "$wallet_synced" = "true" ]; then
+        log "Wallet synced"
+        break
+      fi
+      log "Wallet syncing... (attempt $attempt/$max_attempts)"
+      sleep 3
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: Wallet failed to sync — dumping diagnostics"
+      log "=== wallet status ==="
+      docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/status 2>&1
+      log "=== ark-wallet logs (last 30 lines) ==="
+      docker logs ark-wallet 2>&1 | tail -30
+      log "=== $ARK_CONTAINER logs (last 30 lines) ==="
+      docker logs "$ARK_CONTAINER" 2>&1 | tail -30
+      exit 1
+    fi
+
     # Fund SERVER wallet and generate blocks for fee estimation
     server_addr=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/address 2>/dev/null | jq -r '.address // empty' 2>/dev/null)
     if [ -n "$server_addr" ]; then
