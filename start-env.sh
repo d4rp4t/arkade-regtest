@@ -52,6 +52,7 @@ export ARKD_UNILATERAL_EXIT_DELAY ARKD_BOARDING_EXIT_DELAY ARKD_LIVE_STORE_TYPE
 export ARKD_LOG_LEVEL ARKD_SESSION_DURATION ARKD_ROUND_INTERVAL
 export ARK_OFFCHAIN_OUTPUT_FEE ARK_ONCHAIN_OUTPUT_FEE ARK_OFFCHAIN_INPUT_FEE ARK_ONCHAIN_INPUT_FEE
 export ARKD_UTXO_MAX_AMOUNT ARKD_VTXO_MAX_AMOUNT ARKD_UTXO_MIN_AMOUNT ARKD_VTXO_MIN_AMOUNT
+export ARK_CONTAINER
 
 # ── Nigiri resolution ───────────────────────────────────────────────────────
 build_nigiri_from_source() {
@@ -153,7 +154,7 @@ setup_lnd_wallet() {
 setup_arkd_fees() {
   log "Configuring arkd intent fees..."
   local fee_response
-  fee_response=$(docker exec arkd wget -qO- \
+  fee_response=$(docker exec "$ARK_CONTAINER" wget -qO- \
     --post-data="{\"fees\":{\"offchainInputFee\":\"${ARK_OFFCHAIN_INPUT_FEE}\",\"onchainInputFee\":\"${ARK_ONCHAIN_INPUT_FEE}\",\"offchainOutputFee\":\"${ARK_OFFCHAIN_OUTPUT_FEE}\",\"onchainOutputFee\":\"${ARK_ONCHAIN_OUTPUT_FEE}\"}}" \
     --header="Content-Type: application/json" \
     http://localhost:7071/v1/admin/intentFees 2>&1) || {
@@ -161,7 +162,7 @@ setup_arkd_fees() {
     return 0
   }
   local verify
-  verify=$(docker exec arkd wget -qO- http://localhost:7071/v1/admin/intentFees 2>&1)
+  verify=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/intentFees 2>&1)
   log "arkd fees configured: $verify"
 }
 
@@ -486,9 +487,10 @@ fi
 if [ -n "${ARKD_IMAGE:-}" ]; then
   log "Custom ARKD_IMAGE set: $ARKD_IMAGE"
 
-  # Stop and remove old arkd containers AND volumes to prevent stale state
-  docker stop arkd ark-wallet 2>/dev/null || true
-  docker rm arkd ark-wallet 2>/dev/null || true
+  # Stop and remove old ark containers AND volumes to prevent stale state.
+  # Stop both names: nigiri's built-in "ark" and any prior custom "$ARK_CONTAINER".
+  docker stop ark "$ARK_CONTAINER" ark-wallet 2>/dev/null || true
+  docker rm ark "$ARK_CONTAINER" ark-wallet 2>/dev/null || true
   docker volume rm nigiri_ark_datadir nigiri_ark_wallet_datadir 2>/dev/null || true
   docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" pull
   docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" up -d
@@ -528,11 +530,11 @@ else
     if [ $attempt -gt $max_attempts ]; then
       log "ERROR: arkd admin endpoint failed to respond — dumping diagnostics"
       log "=== ark container status ==="
-      docker ps -a --filter name=arkd --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
+      docker ps -a --filter "name=$ARK_CONTAINER" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
       log "=== ark-wallet logs (last 30 lines) ==="
       docker logs ark-wallet 2>&1 | tail -30
-      log "=== arkd logs (last 30 lines) ==="
-      docker logs arkd 2>&1 | tail -30
+      log "=== $ARK_CONTAINER logs (last 30 lines) ==="
+      docker logs "$ARK_CONTAINER" 2>&1 | tail -30
       exit 1
     fi
 
@@ -546,7 +548,7 @@ else
       seed=$(echo "$seed_resp" | jq -r '.seed // empty' 2>/dev/null || echo "")
       if [ -z "$seed" ]; then
         log "ERROR: Failed to generate wallet seed (response: $seed_resp)"
-        docker logs arkd 2>&1 | tail -20
+        docker logs "$ARK_CONTAINER" 2>&1 | tail -20
         exit 1
       fi
       create_resp=$(curl -s -X POST http://localhost:7071/v1/admin/wallet/create \
@@ -588,8 +590,8 @@ else
       curl -s http://localhost:7071/v1/admin/wallet/status 2>&1
       log "=== ark-wallet logs (last 30 lines) ==="
       docker logs ark-wallet 2>&1 | tail -30
-      log "=== arkd logs (last 30 lines) ==="
-      docker logs arkd 2>&1 | tail -30
+      log "=== $ARK_CONTAINER logs (last 30 lines) ==="
+      docker logs "$ARK_CONTAINER" 2>&1 | tail -30
       exit 1
     fi
 
@@ -606,20 +608,20 @@ else
       log "Server wallet balance: $balance"
     else
       log "WARNING: Could not get server wallet address, falling back to client funding"
-      onchain_addr=$(docker exec arkd arkd receive 2>/dev/null | jq -r ".onchain_address")
+      onchain_addr=$(docker exec "$ARK_CONTAINER" arkd receive 2>/dev/null | jq -r ".onchain_address")
       $NIGIRI faucet "$onchain_addr" "$ARKD_FAUCET_AMOUNT"
       # Convert onchain funds to offchain via redeem-notes
-      note=$(docker exec arkd arkd note --amount 100000000 2>/dev/null)
-      docker exec arkd arkd redeem-notes -n "$note" --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
+      note=$(docker exec "$ARK_CONTAINER" arkd note --amount 100000000 2>/dev/null)
+      docker exec "$ARK_CONTAINER" arkd redeem-notes -n "$note" --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
     fi
   else
-    # Nigiri's built-in arkd — use nigiri CLI for wallet init
-    log "Waiting for arkd to be ready..."
+    # Nigiri's built-in arkd — same admin API, container named "ark".
+    log "Waiting for arkd admin endpoint..."
     max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
-        log "arkd wallet initialized"
+      if docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/status >/dev/null 2>&1; then
+        log "arkd admin endpoint is up"
         break
       fi
       log "Waiting for arkd... (attempt $attempt/$max_attempts)"
@@ -631,8 +633,65 @@ else
       exit 1
     fi
 
+    wallet_status=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+    wallet_initialized=$(echo "$wallet_status" | jq -r '.initialized // false' 2>/dev/null || echo "false")
+
+    if [ "$wallet_initialized" != "true" ]; then
+      log "Creating server wallet..."
+      seed_resp=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/seed 2>/dev/null)
+      seed=$(echo "$seed_resp" | jq -r '.seed // empty' 2>/dev/null || echo "")
+      if [ -z "$seed" ]; then
+        log "ERROR: Failed to generate wallet seed (response: $seed_resp)"
+        docker logs "$ARK_CONTAINER" 2>&1 | tail -20
+        exit 1
+      fi
+      create_resp=$(docker exec "$ARK_CONTAINER" wget -qO- \
+        --post-data="{\"seed\": \"$seed\", \"password\": \"$ARKD_PASSWORD\"}" \
+        --header="Content-Type: application/json" \
+        http://localhost:7071/v1/admin/wallet/create 2>/dev/null)
+      log "Server wallet created: $create_resp"
+    else
+      log "Server wallet already initialized"
+    fi
+
+    wallet_status=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+    wallet_unlocked=$(echo "$wallet_status" | jq -r '.unlocked // false' 2>/dev/null || echo "false")
+
+    if [ "$wallet_unlocked" != "true" ]; then
+      log "Unlocking server wallet..."
+      docker exec "$ARK_CONTAINER" wget -qO- \
+        --post-data="{\"password\": \"$ARKD_PASSWORD\"}" \
+        --header="Content-Type: application/json" \
+        http://localhost:7071/v1/admin/wallet/unlock >/dev/null 2>&1
+    fi
+
+    log "Waiting for wallet to sync..."
+    max_attempts=60
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      wallet_status=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+      wallet_synced=$(echo "$wallet_status" | jq -r '.synced // false' 2>/dev/null || echo "false")
+      if [ "$wallet_synced" = "true" ]; then
+        log "Wallet synced"
+        break
+      fi
+      log "Wallet syncing... (attempt $attempt/$max_attempts)"
+      sleep 3
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: Wallet failed to sync — dumping diagnostics"
+      log "=== wallet status ==="
+      docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/status 2>&1
+      log "=== ark-wallet logs (last 30 lines) ==="
+      docker logs ark-wallet 2>&1 | tail -30
+      log "=== $ARK_CONTAINER logs (last 30 lines) ==="
+      docker logs "$ARK_CONTAINER" 2>&1 | tail -30
+      exit 1
+    fi
+
     # Fund SERVER wallet and generate blocks for fee estimation
-    server_addr=$(curl -s http://localhost:7071/v1/admin/wallet/address | jq -r '.address // empty' 2>/dev/null)
+    server_addr=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/address 2>/dev/null | jq -r '.address // empty' 2>/dev/null)
     if [ -n "$server_addr" ]; then
       log "Funding arkd server wallet at $server_addr (21 txs for fee estimation)..."
       for i in $(seq 1 21); do
@@ -640,13 +699,12 @@ else
       done
       log "Server wallet funded with 21 BTC across 21 blocks"
       sleep 2
-      balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
+      balance=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
       log "Server wallet balance: $balance"
     else
       log "WARNING: Could not get server wallet address, falling back to client funding"
       $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
-      # Convert onchain funds to offchain via redeem-notes
-      $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
+      $NIGIRI ark redeem-notes -n $($NIGIRI ark note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
     fi
   fi
 fi
@@ -763,6 +821,7 @@ echo "  Boltz CORS      http://localhost:${NGINX_PORT}  (nginx proxy)"
 echo "  Boltz gRPC      localhost:${BOLTZ_GRPC_PORT}"
 echo "  Boltz LND       localhost:${BOLTZ_LND_RPC_PORT}"
 echo ""
+echo "  Ark container:  ${ARK_CONTAINER}"
 echo "  Arkd password:  ${ARKD_PASSWORD}"
 if [ -n "${ARKD_IMAGE:-}" ]; then
   echo "  Arkd image:     ${ARKD_IMAGE}"

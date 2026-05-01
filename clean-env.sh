@@ -43,7 +43,7 @@ else
 fi
 
 # ── Export vars for docker-compose interpolation ─────────────────────────────
-export ARKD_IMAGE ARKD_WALLET_IMAGE
+export ARKD_IMAGE ARKD_WALLET_IMAGE ARK_CONTAINER
 export BOLTZ_LND_IMAGE FULMINE_IMAGE BOLTZ_IMAGE NGINX_IMAGE
 export BOLTZ_LND_P2P_PORT BOLTZ_LND_RPC_PORT FULMINE_GRPC_PORT FULMINE_API_PORT FULMINE_HTTP_PORT
 export BOLTZ_GRPC_PORT BOLTZ_API_PORT BOLTZ_WS_PORT NGINX_PORT
@@ -51,8 +51,8 @@ export LNURL_IMAGE WALLET_IMAGE LNURL_PORT WALLET_PORT
 export DELEGATOR_GRPC_PORT DELEGATOR_API_PORT DELEGATOR_HTTP_PORT
 
 # ── Stop arkd override if custom image was used ──────────────────────────────
-if docker ps -a --format '{{.Names}}' | grep -q '^arkd$' && \
-   [ -n "$(docker inspect arkd --format '{{.Config.Image}}' 2>/dev/null | grep -v 'nigiri')" ]; then
+if docker ps -a --format '{{.Names}}' | grep -qE "^(ark|arkd|${ARK_CONTAINER})$" && \
+   [ -n "$(docker inspect "${ARK_CONTAINER}" --format '{{.Config.Image}}' 2>/dev/null | grep -v 'nigiri')" ]; then
   log "Stopping custom arkd override containers..."
   docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" down --volumes --remove-orphans 2>/dev/null || true
 fi
