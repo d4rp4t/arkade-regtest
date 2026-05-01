@@ -615,13 +615,13 @@ else
       docker exec "$ARK_CONTAINER" arkd redeem-notes -n "$note" --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
     fi
   else
-    # Nigiri's built-in arkd — use nigiri CLI for wallet init
-    log "Waiting for arkd to be ready..."
+    # Nigiri's built-in arkd — same admin API, container named "ark".
+    log "Waiting for arkd admin endpoint..."
     max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
-        log "arkd wallet initialized"
+      if docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/status >/dev/null 2>&1; then
+        log "arkd admin endpoint is up"
         break
       fi
       log "Waiting for arkd... (attempt $attempt/$max_attempts)"
@@ -633,8 +633,40 @@ else
       exit 1
     fi
 
+    wallet_status=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+    wallet_initialized=$(echo "$wallet_status" | jq -r '.initialized // false' 2>/dev/null || echo "false")
+
+    if [ "$wallet_initialized" != "true" ]; then
+      log "Creating server wallet..."
+      seed_resp=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/seed 2>/dev/null)
+      seed=$(echo "$seed_resp" | jq -r '.seed // empty' 2>/dev/null || echo "")
+      if [ -z "$seed" ]; then
+        log "ERROR: Failed to generate wallet seed (response: $seed_resp)"
+        docker logs "$ARK_CONTAINER" 2>&1 | tail -20
+        exit 1
+      fi
+      create_resp=$(docker exec "$ARK_CONTAINER" wget -qO- \
+        --post-data="{\"seed\": \"$seed\", \"password\": \"$ARKD_PASSWORD\"}" \
+        --header="Content-Type: application/json" \
+        http://localhost:7071/v1/admin/wallet/create 2>/dev/null)
+      log "Server wallet created: $create_resp"
+    else
+      log "Server wallet already initialized"
+    fi
+
+    wallet_status=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+    wallet_unlocked=$(echo "$wallet_status" | jq -r '.unlocked // false' 2>/dev/null || echo "false")
+
+    if [ "$wallet_unlocked" != "true" ]; then
+      log "Unlocking server wallet..."
+      docker exec "$ARK_CONTAINER" wget -qO- \
+        --post-data="{\"password\": \"$ARKD_PASSWORD\"}" \
+        --header="Content-Type: application/json" \
+        http://localhost:7071/v1/admin/wallet/unlock >/dev/null 2>&1
+    fi
+
     # Fund SERVER wallet and generate blocks for fee estimation
-    server_addr=$(curl -s http://localhost:7071/v1/admin/wallet/address | jq -r '.address // empty' 2>/dev/null)
+    server_addr=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/address 2>/dev/null | jq -r '.address // empty' 2>/dev/null)
     if [ -n "$server_addr" ]; then
       log "Funding arkd server wallet at $server_addr (21 txs for fee estimation)..."
       for i in $(seq 1 21); do
@@ -642,13 +674,12 @@ else
       done
       log "Server wallet funded with 21 BTC across 21 blocks"
       sleep 2
-      balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
+      balance=$(docker exec "$ARK_CONTAINER" wget -qO- http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
       log "Server wallet balance: $balance"
     else
       log "WARNING: Could not get server wallet address, falling back to client funding"
       $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
-      # Convert onchain funds to offchain via redeem-notes
-      $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
+      $NIGIRI ark redeem-notes -n $($NIGIRI ark note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
     fi
   fi
 fi
