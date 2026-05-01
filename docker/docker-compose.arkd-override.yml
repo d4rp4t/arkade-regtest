@@ -17,7 +17,7 @@ services:
 
   ark:
     image: ${ARKD_IMAGE}
-    container_name: arkd
+    container_name: ${ARK_CONTAINER:-arkd}
     restart: unless-stopped
     depends_on:
       - ark-wallet
