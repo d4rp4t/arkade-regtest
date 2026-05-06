@@ -98,6 +98,8 @@ fi
 if [[ "$PRUNE_IMAGES" = true ]]; then
   log "Removing dangling Docker images..."
   docker image prune -f
+  log "Removing dangling Docker volumes..."
+  docker volume prune -f
 fi
 
 log "Clean-up complete."
