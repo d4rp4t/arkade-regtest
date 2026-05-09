@@ -546,6 +546,12 @@ else
       sleep 2
       balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
       log "Server wallet balance: $balance"
+      # Also fund the CLIENT (ark CLI) wallet via redeem-notes — SDK E2E
+      # suites (e.g. arkade-os/dotnet-sdk) drive `ark send` from the
+      # client wallet for per-test funding and would otherwise see 0 sats
+      # offchain.
+      log "Funding ark CLI client wallet via redeem-notes..."
+      $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: client redeem-notes failed (older arkd version?)"
     else
       log "WARNING: Could not get server wallet address, falling back to client funding"
       $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
@@ -582,6 +588,12 @@ else
       sleep 2
       balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
       log "Server wallet balance: $balance"
+      # Also fund the CLIENT (ark CLI) wallet via redeem-notes — SDK E2E
+      # suites (e.g. arkade-os/dotnet-sdk) drive `ark send` from the
+      # client wallet for per-test funding and would otherwise see 0 sats
+      # offchain.
+      log "Funding ark CLI client wallet via redeem-notes..."
+      $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: client redeem-notes failed (older arkd version?)"
     else
       log "WARNING: Could not get server wallet address, falling back to client funding"
       $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
