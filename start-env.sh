@@ -826,4 +826,10 @@ echo "  Arkd password:  ${ARKD_PASSWORD}"
 if [ -n "${ARKD_IMAGE:-}" ]; then
   echo "  Arkd image:     ${ARKD_IMAGE}"
 fi
+echo "  Boltz image: ${BOLTZ_IMAGE}"
+echo "  Nginx image: ${NGINX_IMAGE}"
+echo "  LNURL image: ${LNURL_IMAGE}"
+echo "  Wallet image: ${WALLET_IMAGE}"
+echo "  Fulmine image: ${FULMINE_IMAGE}"
+echo "  Boltz LND image: ${BOLTZ_LND_IMAGE}"
 echo ""
