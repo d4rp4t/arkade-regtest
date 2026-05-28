@@ -36,6 +36,18 @@ ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.0
 
 When set, `start-env.sh` stops nigiri's arkd and starts these images instead.
 
+### Emulator (arkade-script signing service)
+
+The [arkade-os/emulator](https://github.com/arkade-os/emulator) service validates arkade-script covenants on Ark transactions and signs the matching script-tweaked key. Enable it by setting `EMULATOR_IMAGE` in your override file:
+
+```bash
+EMULATOR_IMAGE=ghcr.io/arkade-os/emulator:v0.0.1
+```
+
+When set, `start-env.sh` brings the emulator up on the nigiri network after arkd is wallet-ready, exposes it at `http://localhost:${EMULATOR_PORT}` (default `7073`), and waits for `GET /v1/info` to respond before returning. The signing key is configured via `EMULATOR_SECRET_KEY`; the corresponding x-only pubkey is reported in the startup banner and on the info endpoint, so tests can pin to it.
+
+The emulator is opt-in because most regtest consumers don't use arkade-script — leaving `EMULATOR_IMAGE` empty keeps the default boot fast.
+
 ## Nigiri resolution
 
 By default, Nigiri is built from source using the `bump-arkd` branch (`NIGIRI_BRANCH` in `.env.defaults`). This ensures all consumers use the exact same version with Ark support.
@@ -54,6 +66,7 @@ To use a system-installed nigiri instead, set `NIGIRI_BRANCH=""` in your `.env` 
 | Boltz REST API   | `localhost:9001`            | 9001         |
 | Boltz WebSocket  | `localhost:9004`            | 9004         |
 | Nginx            | `localhost:9069`            | 9069         |
+| Emulator         | `localhost:7073` (opt-in)   | 7073         |
 
 Nigiri's own services (electrs, esplora, chopsticks, arkd) use their standard ports. See the Nigiri documentation for details.
 

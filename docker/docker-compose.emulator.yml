@@ -1,0 +1,43 @@
+# Emulator overlay — runs the arkade-os/emulator signing service on the
+# nigiri network created by the main stack. Opt-in: only started when
+# EMULATOR_IMAGE is set in the env, mirroring the ARKD_IMAGE override pattern.
+#
+# Why opt-in: the emulator is required only by projects that use
+# arkade-script (covenant-validated 2-of-2 [arkd, emulator-tweaked] leaves).
+# Most regtest consumers don't need it; making it opt-in keeps boot fast
+# and the default surface small.
+#
+# Reference contract: https://github.com/arkade-os/emulator
+# Image tags:        https://github.com/arkade-os/emulator/pkgs/container/emulator
+name: nigiri
+services:
+  emulator:
+    image: ${EMULATOR_IMAGE}
+    container_name: emulator
+    restart: unless-stopped
+    ports:
+      - '${EMULATOR_PORT}:7073'
+    environment:
+      # TLS off for local regtest — the emulator is reached over plain HTTP
+      # from arkd, tests, and the host. NEVER set this in production.
+      EMULATOR_NO_TLS: 'true'
+      # Deterministic signing key. The corresponding x-only pubkey is
+      # discoverable via GET /v1/info after startup; tests pin to it.
+      EMULATOR_SECRET_KEY: ${EMULATOR_SECRET_KEY}
+      EMULATOR_PORT: '7073'
+      EMULATOR_LOG_LEVEL: ${EMULATOR_LOG_LEVEL}
+      # Points the emulator at the arkd inside the same nigiri network. The
+      # emulator submits finalized arkade transactions to arkd after running
+      # the validation pass; arkd's hostname is "ark" (nigiri default) or
+      # "arkd" (custom override) — both alias to the same container.
+      EMULATOR_ARKD_URL: ${EMULATOR_ARKD_URL}
+    volumes:
+      # tmpfs because the emulator is stateless across regtest sessions —
+      # the signing key lives in env, no on-disk persistence is needed.
+      - type: tmpfs
+        target: /app/data
+
+networks:
+  default:
+    name: nigiri
+    external: true
