@@ -5,9 +5,9 @@ services:
     restart: unless-stopped
     container_name: boltz-lnd
     environment:
-      LND_CHAIN: "btc"
-      LND_ENVIRONMENT: "regtest"
-      LND_EXPLORERURL: "http://nbxplorer:32838/"
+      LND_CHAIN: 'btc'
+      LND_ENVIRONMENT: 'regtest'
+      LND_EXPLORERURL: 'http://nbxplorer:32838/'
       LND_REST_LISTEN_HOST: http://boltz-lnd:8080
       LND_EXTRA_ARGS: |
         bitcoin.node=bitcoind
@@ -112,10 +112,12 @@ services:
       BOLTZ_CONFIG: |
         loglevel = "debug"
         network = "regtest"
+
         [ark]
         host = "boltz-fulmine"
         port = 7000
         useLocktimeSeconds = true
+        rescanInterval = 30
 
         [ark.unilateralDelays]
         claim = 444
@@ -166,7 +168,7 @@ services:
 
         [pairs.timeoutDelta]
         reverse = 1440
-        chain=1440
+        chain = 1440
         swapMinimal = 1440
         swapMaximal = 2880
         swapTaproot = 10080
