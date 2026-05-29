@@ -1,11 +1,7 @@
 # Emulator overlay — runs the arkade-os/emulator signing service on the
-# nigiri network created by the main stack. Opt-in: only started when
-# EMULATOR_IMAGE is set in the env, mirroring the ARKD_IMAGE override pattern.
-#
-# Why opt-in: the emulator is required only by projects that use
-# arkade-script (covenant-validated 2-of-2 [arkd, emulator-tweaked] leaves).
-# Most regtest consumers don't need it; making it opt-in keeps boot fast
-# and the default surface small.
+# nigiri network created by the main stack. Default-on; consumers that don't
+# need arkade-script can opt-out by setting EMULATOR_IMAGE= (empty) in their
+# `.env` override, which makes start-env.sh skip the overlay entirely.
 #
 # Reference contract: https://github.com/arkade-os/emulator
 # Image tags:        https://github.com/arkade-os/emulator/pkgs/container/emulator

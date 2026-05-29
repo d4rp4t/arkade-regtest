@@ -803,10 +803,11 @@ if [ $attempt -gt $max_attempts ]; then
   exit 1
 fi
 
-# ── Emulator (opt-in arkade-script signing service) ──────────────────────────
-# Only started when EMULATOR_IMAGE is set in env. Comes up after arkd is
-# wallet-ready because EMULATOR_ARKD_URL must resolve to a live arkd that
-# accepts SubmitTx — the emulator forwards the finalized arkade tx to it.
+# ── Emulator (arkade-script signing service, default-on) ────────────────────
+# Default-on; consumers opt out by setting EMULATOR_IMAGE= (empty) in their
+# `.env` override. Comes up after arkd is wallet-ready because
+# EMULATOR_ARKD_URL must resolve to a live arkd that accepts SubmitTx — the
+# emulator forwards the finalized arkade tx to it.
 if [ -n "${EMULATOR_IMAGE:-}" ]; then
   if docker ps --format '{{.Names}}' | grep -q '^emulator$'; then
     log "Emulator already running, skipping..."
