@@ -28,6 +28,13 @@ export BOLTZ_LND_P2P_PORT BOLTZ_LND_RPC_PORT FULMINE_GRPC_PORT FULMINE_API_PORT 
 export BOLTZ_GRPC_PORT BOLTZ_API_PORT BOLTZ_WS_PORT NGINX_PORT
 export LNURL_IMAGE WALLET_IMAGE LNURL_PORT WALLET_PORT
 export DELEGATOR_GRPC_PORT DELEGATOR_API_PORT DELEGATOR_HTTP_PORT
+export EMULATOR_IMAGE EMULATOR_PORT EMULATOR_SECRET_KEY EMULATOR_ARKD_URL EMULATOR_LOG_LEVEL
+
+# ── Stop emulator overlay if it was started ──────────────────────────────────
+if docker ps --format '{{.Names}}' | grep -q '^emulator$'; then
+  log "Stopping emulator overlay..."
+  docker compose -f "$SCRIPT_DIR/docker/docker-compose.emulator.yml" stop 2>/dev/null || true
+fi
 
 # ── Stop arkd override if custom image was used ──────────────────────────────
 if docker ps --format '{{.Names}}' | grep -qE "^(ark|arkd|${ARK_CONTAINER})$" && \

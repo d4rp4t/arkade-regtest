@@ -47,11 +47,12 @@ export BOLTZ_LND_P2P_PORT BOLTZ_LND_RPC_PORT FULMINE_GRPC_PORT FULMINE_API_PORT 
 export DELEGATOR_GRPC_PORT DELEGATOR_API_PORT DELEGATOR_HTTP_PORT
 export BOLTZ_GRPC_PORT BOLTZ_API_PORT BOLTZ_WS_PORT NGINX_PORT LNURL_PORT WALLET_PORT
 export ARKD_WALLET_SIGNER_KEY ARKD_PUBLIC_UNILATERAL_EXIT_DELAY ARKD_CHECKPOINT_EXIT_DELAY
-export ARKD_SCHEDULER_TYPE ARKD_ALLOW_CSV_BLOCK_TYPE ARKD_VTXO_TREE_EXPIRY
+export ARKD_VTXO_TREE_EXPIRY
 export ARKD_UNILATERAL_EXIT_DELAY ARKD_BOARDING_EXIT_DELAY ARKD_LIVE_STORE_TYPE
-export ARKD_LOG_LEVEL ARKD_SESSION_DURATION ARKD_ROUND_INTERVAL
+export ARKD_LOG_LEVEL ARKD_SESSION_DURATION
 export ARK_OFFCHAIN_OUTPUT_FEE ARK_ONCHAIN_OUTPUT_FEE ARK_OFFCHAIN_INPUT_FEE ARK_ONCHAIN_INPUT_FEE
 export ARKD_UTXO_MAX_AMOUNT ARKD_VTXO_MAX_AMOUNT ARKD_UTXO_MIN_AMOUNT ARKD_VTXO_MIN_AMOUNT
+export EMULATOR_IMAGE EMULATOR_PORT EMULATOR_SECRET_KEY EMULATOR_ARKD_URL EMULATOR_LOG_LEVEL
 export ARK_CONTAINER
 
 # ── Nigiri resolution ───────────────────────────────────────────────────────
@@ -802,6 +803,42 @@ if [ $attempt -gt $max_attempts ]; then
   exit 1
 fi
 
+# ── Emulator (arkade-script signing service, default-on) ────────────────────
+# Default-on; consumers opt out by setting EMULATOR_IMAGE= (empty) in their
+# `.env` override. Comes up after arkd is wallet-ready because
+# EMULATOR_ARKD_URL must resolve to a live arkd that accepts SubmitTx — the
+# emulator forwards the finalized arkade tx to it.
+if [ -n "${EMULATOR_IMAGE:-}" ]; then
+  if docker ps --format '{{.Names}}' | grep -q '^emulator$'; then
+    log "Emulator already running, skipping..."
+  else
+    log "Starting emulator overlay ($EMULATOR_IMAGE)..."
+    docker compose -f "$SCRIPT_DIR/docker/docker-compose.emulator.yml" pull
+    docker compose -f "$SCRIPT_DIR/docker/docker-compose.emulator.yml" up -d
+
+    log "Waiting for emulator /v1/info..."
+    max_attempts=30
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      if curl -sf --max-time 3 "http://localhost:${EMULATOR_PORT}/v1/info" >/dev/null 2>&1; then
+        log "Emulator is up at http://localhost:${EMULATOR_PORT}"
+        emu_pubkey=$(curl -s "http://localhost:${EMULATOR_PORT}/v1/info" | jq -r '.signerPubkey // empty')
+        log "Emulator signerPubkey: $emu_pubkey"
+        break
+      fi
+      log "Waiting for emulator... (attempt $attempt/$max_attempts)"
+      sleep 2
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: Emulator failed to respond on /v1/info"
+      log "=== emulator logs (last 30 lines) ==="
+      docker logs emulator 2>&1 | tail -30
+      exit 1
+    fi
+  fi
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "========================================"
@@ -832,4 +869,8 @@ echo "  LNURL image: ${LNURL_IMAGE}"
 echo "  Wallet image: ${WALLET_IMAGE}"
 echo "  Fulmine image: ${FULMINE_IMAGE}"
 echo "  Boltz LND image: ${BOLTZ_LND_IMAGE}"
+if [ -n "${EMULATOR_IMAGE:-}" ]; then
+  echo "  Emulator        http://localhost:${EMULATOR_PORT}"
+  echo "  Emulator image: ${EMULATOR_IMAGE}"
+fi
 echo ""
