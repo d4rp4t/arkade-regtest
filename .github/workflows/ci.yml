@@ -1,0 +1,150 @@
+name: ci
+
+# Self-test: boot the whole regtest stack on a clean Linux runner and assert the
+# key services come up, then tear it down. Proves the environment works
+# cross-platform (the orchestrator is also developed on Windows/macOS).
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Start regtest environment
+        run: node regtest.mjs start
+
+      - name: Verify services
+        run: |
+          set -euo pipefail
+
+          echo "== arkd =="
+          curl -sf http://localhost:7070/v1/info | jq -e '.signerPubkey != null'
+
+          echo "== mempool Esplora API (regtest) =="
+          test "$(curl -sf http://localhost:3000/api/blocks/tip/height)" -ge 0
+
+          echo "== Fulmine wallet (initialized + funded) =="
+          curl -sf http://localhost:7003/api/v1/wallet/status | jq -e '.initialized == true'
+          curl -sf http://localhost:7003/api/v1/balance | jq -e '(.amount | tonumber) > 0'
+
+          echo "== Delegator wallet (initialized + funded) =="
+          curl -sf http://localhost:7011/api/v1/wallet/status | jq -e '.initialized == true'
+          curl -sf http://localhost:7011/api/v1/balance | jq -e '(.amount | tonumber) > 0'
+
+          echo "== Boltz ARK/BTC pairs (direct API) =="
+          curl -sf http://localhost:9001/v2/swap/submarine | grep -q '"ARK"'
+          echo "== Boltz CORS proxy (nginx) =="
+          curl -sf http://localhost:9069/v2/swap/submarine | grep -q '"ARK"'
+
+          echo "== Emulator =="
+          curl -sf http://localhost:7073/v1/info | jq -e '.signerPubkey != null'
+
+          echo "== Solver =="
+          # solverd's HTTP root may return a non-2xx; any HTTP code (not 000) means it's listening.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:7091/)" != "000"
+
+          echo "== Arkade explorer =="
+          curl -sf http://localhost:7080/ -o /dev/null
+
+          echo "== ark client CLI (initialized + funded) =="
+          docker exec arkd ark balance | jq -e '.offchain_balance.total > 0'
+
+      - name: Exercise a settlement (deep flow — round + on-chain commitment)
+        run: |
+          set -euo pipefail
+          # Drives a full arkd round: the client settles its preconfirmed VTXOs
+          # into a confirmed batch, which broadcasts the commitment tx (P2A anchor
+          # + CPFP via submitpackage) and builds the VTXO tree. This exercises the
+          # esplora + submitpackage paths the lightweight balance check never hits
+          # (and which the downstream e2e suites depend on).
+          before=$(docker exec arkd ark balance | jq -r '.offchain_balance.total')
+          echo "offchain balance before settle: $before"
+          timeout 180 docker exec arkd ark settle --password secret
+          node regtest.mjs mine 1
+          sleep 5
+          after=$(docker exec arkd ark balance | jq -r '.offchain_balance.total')
+          echo "offchain balance after settle: $after"
+          test "$after" -gt 0
+
+      - name: Exercise the mine helper
+        run: |
+          set -euo pipefail
+          before=$(curl -sf http://localhost:3000/api/blocks/tip/height)
+          node regtest.mjs mine 3
+          # mempool polls bitcoind on an interval, so allow a few seconds for it
+          # to index the new blocks before asserting the tip advanced.
+          for i in $(seq 1 15); do
+            after=$(curl -sf http://localhost:3000/api/blocks/tip/height)
+            if [ "$after" -ge "$((before + 3))" ]; then echo "tip $before -> $after"; exit 0; fi
+            sleep 2
+          done
+          echo "tip did not advance ($before -> ${after:-?})"; exit 1
+
+      - name: Exercise the reorg helper
+        run: |
+          set -euo pipefail
+          before=$(docker exec bitcoin bitcoin-cli -regtest -rpcuser=admin1 -rpcpassword=123 getblockcount)
+          node regtest.mjs reorg 2
+          after=$(docker exec bitcoin bitcoin-cli -regtest -rpcuser=admin1 -rpcpassword=123 getblockcount)
+          # reorg 2 invalidates 2 blocks and mines 3, so the tip advances by 1.
+          test "$after" -gt "$before"
+          echo "reorg 2: height $before -> $after"
+
+      - name: Exercise signer rotation (operator key rotation + deprecation)
+        run: |
+          set -euo pipefail
+          # Rotate twice. The first rotation moves off arkd-wallet's self-generated
+          # key to a CLI-managed one (which can't be deprecated — its private key was
+          # never ours); the second deprecates THAT key with a future cutoff. Asserts
+          # the active signer changes each time and a deprecated signer is advertised,
+          # proving the rc images honor ARKD_WALLET_DEPRECATED_SIGNER_KEYS.
+          before=$(curl -sf http://localhost:7070/v1/info | jq -r '.signerPubkey')
+          node regtest.mjs rotate-signer
+          mid=$(curl -sf http://localhost:7070/v1/info | jq -r '.signerPubkey')
+          test "$before" != "$mid"
+          node regtest.mjs rotate-signer --cutoff +86400
+          after=$(curl -sf http://localhost:7070/v1/info | jq -r '.signerPubkey')
+          test "$mid" != "$after"
+          curl -sf http://localhost:7070/v1/info | jq -e '.deprecatedSigners | length >= 1'
+          node regtest.mjs signer-info
+          echo "signer rotation: $before -> $mid -> $after"
+
+      - name: Exercise set-signers (explicit signer set)
+        run: |
+          set -euo pipefail
+          # Apply an EXPLICIT set (the keys ts-sdk's e2e uses): active afcd3fa1…,
+          # deprecated b7e15162… with a future cutoff. Asserts the active is that
+          # key's pubkey and exactly one deprecated signer is advertised.
+          A=afcd3fa10f82a05fddc9574fdb13b3991b568e89cc39a72ba4401df8abef35f0
+          B=b7e151628aed2a6abf7158809cf4f3c762e7160f38b4da56a784d9045190cfef
+          node regtest.mjs set-signers --active "$A" --deprecated "$B:$(( $(date +%s) + 86400 ))"
+          info=$(curl -sf http://localhost:7070/v1/info)
+          echo "$info" | jq -e '.deprecatedSigners | length == 1'
+          echo "$info" | jq -e '.signerPubkey | test("e35799157be4b37565bb5afe4d04e6a0fa0a4b6a4f4e48b0d904685d253cdbdb")'
+          node regtest.mjs signer-info
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          docker compose -f docker/compose.base.yml -f docker/compose.ark.yml ps || true
+          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd arkade-wallet arkade-explorer boltz boltz-lnd boltz-fulmine emulator solver; do
+            echo "===== logs: $c ====="
+            docker logs --tail 80 "$c" 2>&1 || true
+          done
+
+      - name: Cleanup
+        if: always()
+        run: node regtest.mjs clean

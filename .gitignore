@@ -1,2 +1,5 @@
 _build/
 .env
+
+# Signer keys persisted by the rotate-signer CLI command (see lib/setup/signer.mjs)
+.signer-state.json
