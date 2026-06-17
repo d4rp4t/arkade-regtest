@@ -130,7 +130,7 @@ services:
 
   # ── Fulmine (Ark wallet daemon, Boltz-integrated) ──────────────────────────
   boltz-fulmine:
-    image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.23}
+    image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.25}
     container_name: boltz-fulmine
     profiles: ["boltz"]
     environment:
@@ -144,8 +144,8 @@ services:
       - FULMINE_UNLOCKER_PASSWORD=password
       - FULMINE_LND_URL=http://boltz-lnd:10009
       - FULMINE_LND_DATADIR=/root/.lnd
-      - FULMINE_DELEGATOR_ENABLED=true
-      - FULMINE_DELEGATOR_FEE=350
+      - FULMINE_DELEGATE_ENABLED=true
+      - FULMINE_DELEGATE_FEE=350
     ports:
       - ${FULMINE_GRPC_PORT:-7004}:7000
       - ${FULMINE_API_PORT:-7003}:7001
@@ -156,7 +156,7 @@ services:
     restart: unless-stopped
 
   fulmine-delegator:
-    image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.23}
+    image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.25}
     container_name: fulmine-delegator
     profiles: ["delegate"]
     environment:
@@ -166,7 +166,7 @@ services:
       - FULMINE_DISABLE_TELEMETRY=true
       - FULMINE_UNLOCKER_TYPE=env
       - FULMINE_UNLOCKER_PASSWORD=password
-      - FULMINE_DELEGATOR_ENABLED=true
+      - FULMINE_DELEGATE_ENABLED=true
     ports:
       - ${DELEGATOR_GRPC_PORT:-7010}:7000
       - ${DELEGATOR_API_PORT:-7011}:7001
