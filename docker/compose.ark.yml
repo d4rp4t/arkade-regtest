@@ -312,7 +312,7 @@ services:
 
   # ── LNURL server ───────────────────────────────────────────────────────────
   lnurl-server:
-    image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.1.0}
+    image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.2.6}
     container_name: lnurl-server
     profiles: ["boltz"]
     ports:
@@ -359,7 +359,7 @@ services:
 
   # ── Emulator (arkade-script signing service) — profile-gated, started last ──
   emulator:
-    image: ${EMULATOR_IMAGE:-ghcr.io/arkade-os/emulator:v0.0.1}
+    image: ${EMULATOR_IMAGE:-ghcr.io/arkade-os/emulator:v0.0.3}
     container_name: emulator
     restart: unless-stopped
     profiles:
@@ -382,7 +382,7 @@ services:
   # solverd's own listeners stay on the in-container 7070/7071 defaults; only
   # the host ports are remapped (7090/7091) to avoid colliding with arkd.
   solver:
-    image: ${SOLVER_IMAGE:-ghcr.io/arkade-os/solver:v0.0.1-rc.2}
+    image: ${SOLVER_IMAGE:-ghcr.io/arkade-os/solver:v0.0.1-rc.5}
     container_name: solver
     profiles: ["solver"]
     restart: unless-stopped
