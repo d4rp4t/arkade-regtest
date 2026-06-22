@@ -168,8 +168,17 @@ async function start(opts) {
 
   const profiles = [...active];
   log(`Starting arkade-regtest stack (profiles: ${profiles.join(', ')})...`);
-  const up = composeUp([], { profiles });
-  if (up.code !== 0) fail('docker compose up failed');
+
+  // Stagger startup when the closure is more than just base. Bringing up all
+  // ~18 containers at once overwhelms Docker's embedded DNS (arkd <-> arkd-wallet
+  // "server misbehaving") and races arkd-wallet against nbxplorer's first-boot
+  // migration, crash-looping both. So bring up base (bitcoind, nbxplorer,
+  // fulcrum, mempool, postgres) FIRST, settle the chain + explorer, and only
+  // THEN start the app layer (ark, boltz, ...) against a healthy base.
+  const phased = active.has('base') && active.size > 1;
+
+  const firstWave = composeUp([], { profiles: phased ? ['base'] : profiles });
+  if (firstWave.code !== 0) fail('docker compose up failed');
 
   // base (always in any closure): wait for bitcoind RPC, fund the node wallet,
   // and wait for the explorer's Esplora API before anything tries to sync.
@@ -181,6 +190,13 @@ async function start(opts) {
     httpOk(`http://localhost:${env('MEMPOOL_WEB_PORT', '3000')}/api/blocks/tip/height`),
     { attempts: 60, intervalMs: 3000 },
   );
+
+  // Second wave: the rest of the closure, now that base is healthy. composeUp is
+  // additive, so this only starts the app-layer containers.
+  if (phased) {
+    const appWave = composeUp([], { profiles });
+    if (appWave.code !== 0) fail('docker compose up failed');
+  }
 
   if (active.has('ark')) await setupArkd();
   if (active.has('delegate')) await setupDelegator();
