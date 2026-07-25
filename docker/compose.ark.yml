@@ -230,6 +230,34 @@ services:
         username = "postgres"
         password = "postgres"
 
+        # EVM (Arbitrum) chain config, pointed at the local Anvil node. Contract
+        # addresses come from lib/setup/evm.mjs, which deploys EtherSwap +
+        # ERC20Swap + a TestERC20 (as TBTC) to Anvil and exports EVM_* env vars
+        # before this container starts — see regtest.mjs's start(), which runs
+        # setupEvm() ahead of the boltz wave specifically so these interpolate
+        # correctly. EtherSwap is deployed but otherwise unused (no native-ETH
+        # HTLC swaps in this setup) — Boltz's EthereumConfig requires a real
+        # contract at etherSwap and refuses to start ("no contract at address")
+        # against a placeholder/zero address.
+        [arbitrum]
+        providerEndpoint = "http://anvil:8545"
+        # Required against Anvil: ArbitrumProvider.getLatestBlock() (lib/wallet/
+        # ethereum/ArbitrumProvider.ts) reads eth_getBlockByNumber's
+        # l1BlockNumber field and, without regtest=true, throws at startup
+        # ("Arbitrum RPC returned no l1BlockNumber...") instead of falling back
+        # to the plain L2 block number — Anvil doesn't populate that field.
+        regtest = true
+
+        [[arbitrum.contracts]]
+        etherSwap = "${EVM_ETHERSWAP_ADDRESS}"
+        erc20Swap = "${EVM_ERC20SWAP_ADDRESS}"
+
+        [[arbitrum.tokens]]
+        symbol = "TBTC"
+        contractAddress = "${EVM_TBTC_ADDRESS}"
+        decimals = 8
+        minWalletBalance = 100000000
+
         [swap]
         deferredClaimSymbols = [ "BTC" ]
 
@@ -251,6 +279,24 @@ services:
         # This means arkd must have vtxo tree expiry > 24 blocks or we can't test refund of swaps
         # with offchain tx.
         # Also, as per our LN environment, swapTaproot min value is 810 (81 blocks).
+        reverse = 240
+        chain = 100
+        swapMinimal = 100
+        swapMaximal = 200
+        swapTaproot = 1200
+
+        [[pairs]]
+        base = "ARK"
+        quote = "TBTC"
+        rate = 1
+        fee = 0.4
+        swapInFee = 0.01
+        invoiceExpiry = 3600
+        maxSwapAmount = 4294967
+        minSwapAmount = 1000
+
+        [pairs.timeoutDelta]
+        ## Same rationale as the ARK/BTC pair above.
         reverse = 240
         chain = 100
         swapMinimal = 100
@@ -281,6 +327,14 @@ services:
         port = 10009
         certpath = "/home/boltz/.lnd/tls.cert"
         macaroonpath = "/home/boltz/.lnd/data/chain/bitcoin/regtest/admin.macaroon"
+        # NOTE: no top-level [[currencies]] entry for TBTC — that array is for
+        # Bitcoin/UTXO-style currencies with their own HD derivation path; adding
+        # an EVM token there makes boltzr's Rust-side currency loop fail with
+        # "no key derivation path for TBTC". TBTC's wallet comes entirely from
+        # [[arbitrum.tokens]] above (EthereumManager registers a per-token wallet
+        # keyed by symbol) — see the plan/commit notes for the open question of
+        # whether SwapManager.getCurrency("TBTC") needs something else wired up
+        # for actual swap execution (pair *listing* works without it).
     volumes:
       - boltz_datadir:/home/boltz/.boltz
       - boltz_lnd_datadir:/home/boltz/.lnd
