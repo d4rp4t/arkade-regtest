@@ -1,0 +1,28 @@
+# EVM (Anvil) layer for arkade-regtest.
+#
+# Layered on top of docker/compose.base.yml + docker/compose.ark.yml in the same
+# `docker compose -f base -f ark -f evm` invocation (see lib/compose.mjs), so it
+# shares the base project's network and is reachable by other services as
+# `anvil`. Gated behind the `evm` profile: only started with `--profile evm`
+# (which `boltz` now depends on transitively — see PROFILE_DEPS in regtest.mjs —
+# so a live ARK<->TBTC pair is always available whenever boltz is up).
+#
+# The orchestrator (lib/setup/evm.mjs) deploys ERC20Swap + a TestERC20 (as
+# TBTC) into this node via `cast` run *inside* the container (the Foundry image
+# ships cast alongside anvil), before the boltz container starts — boltz's
+# BOLTZ_CONFIG needs the deployed addresses baked in via ${EVM_*} interpolation
+# at container-creation time.
+name: arkade-regtest
+
+services:
+  anvil:
+    image: ${ANVIL_IMAGE:-ghcr.io/foundry-rs/foundry:latest}
+    container_name: anvil
+    profiles: ['evm']
+    restart: unless-stopped
+    ports:
+      - '${ANVIL_PORT:-8545}:8545'
+    entrypoint:
+      - anvil
+      - --host
+      - 0.0.0.0

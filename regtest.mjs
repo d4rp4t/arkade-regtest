@@ -27,6 +27,7 @@ import { bitcoinCli, bootstrapChain, mine, faucet, reorg } from './lib/chain.mjs
 import { setupArkd, applyArkdFees } from './lib/setup/arkd.mjs';
 import { setupFulmine, setupDelegator } from './lib/setup/fulmine.mjs';
 import { setupBoltz } from './lib/setup/boltz.mjs';
+import { setupEvm } from './lib/setup/evm.mjs';
 import { setupSolver } from './lib/setup/solver.mjs';
 import { createInvoice, payInvoice } from './lib/invoice.mjs';
 import { rotateSigner, setSigners, signerInfo, clearSignerState } from './lib/setup/signer.mjs';
@@ -37,7 +38,12 @@ const PROFILE_DEPS = {
   base: [],
   ark: ['base'],
   delegate: ['ark'], // standalone fulmine-delegator
-  boltz: ['ark'], // boltz + its own boltz-fulmine + boltz-lnd (independent of the delegator)
+  // boltz depends on evm (Anvil) too: BOLTZ_CONFIG's [arbitrum] block bakes in
+  // the deployed ERC20Swap/TBTC addresses via ${EVM_*} interpolation, so an
+  // ARK<->TBTC pair is always available whenever boltz is up — no separate
+  // "did you also remember --profile evm" footgun.
+  boltz: ['ark', 'evm'], // boltz + its own boltz-fulmine + boltz-lnd (independent of the delegator)
+  evm: [], // standalone Anvil node; usable on its own for isolated contract testing
   emulator: ['ark'],
   covclaimd: ['ark', 'emulator'], // non-interactive claim daemon; needs arkd + emulator
   solver: ['ark', 'emulator'],
@@ -90,6 +96,27 @@ function resolveCutoff(raw) {
   }
   const relative = /^[+-]/.test(String(raw).trim());
   return relative ? Math.floor(Date.now() / 1000) + n : Math.trunc(n);
+}
+
+async function anvilReady(port) {
+  const { ok, json } = await fetchJson(`http://localhost:${port}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_chainId', params: [], id: 1 }),
+  });
+  return ok && json?.result != null;
+}
+
+async function startAnvil() {
+  if (!env('ANVIL_IMAGE')) {
+    log('EVM/Anvil disabled (ANVIL_IMAGE empty), skipping...');
+    return;
+  }
+  const port = env('ANVIL_PORT', '8545');
+  log(`Starting Anvil (${env('ANVIL_IMAGE')})...`);
+  composeUp(['anvil'], { profiles: ['evm'] });
+  await waitForOrFail('Anvil JSON-RPC', () => anvilReady(port));
+  log(`Anvil up at http://localhost:${port}`);
 }
 
 async function startEmulator() {
@@ -147,6 +174,11 @@ function banner(active) {
     lines.push(`  Boltz CORS      http://localhost:${env('NGINX_PORT', '9069')}`);
     lines.push(`  Boltz gRPC      localhost:${env('BOLTZ_GRPC_PORT', '9000')}`);
   }
+  if (active.has('evm')) {
+    lines.push(`  Anvil (EVM)     http://localhost:${env('ANVIL_PORT', '8545')}`);
+    if (process.env.EVM_ERC20SWAP_ADDRESS) lines.push(`    ERC20Swap     ${process.env.EVM_ERC20SWAP_ADDRESS}`);
+    if (process.env.EVM_TBTC_ADDRESS) lines.push(`    TBTC          ${process.env.EVM_TBTC_ADDRESS}`);
+  }
   if (active.has('emulator')) {
     lines.push(`  Emulator        http://localhost:${env('EMULATOR_PORT', '7073')}`);
   }
@@ -179,6 +211,13 @@ async function start(opts) {
   // setupSolver() — it is not a startable tier and resolveProfiles() rejects it.
   const requested = opts.profiles.length ? opts.profiles : fromEnv.length ? fromEnv : Object.keys(PROFILE_DEPS);
   const active = new Set(resolveProfiles(requested));
+
+  // EVM/Anvil opt-out: clearing ANVIL_IMAGE disables it — and boltz, whose
+  // [arbitrum] pair config depends on Anvil's deployed contract addresses.
+  if (!env('ANVIL_IMAGE')) {
+    if (active.delete('evm')) log('EVM/Anvil disabled (ANVIL_IMAGE empty)');
+    if (active.delete('boltz')) warn('Boltz needs Anvil for its ARK<->TBTC pair; skipping it (ANVIL_IMAGE is empty)');
+  }
 
   // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver +
   // covclaimd, which both require the emulator.
@@ -217,6 +256,17 @@ async function start(opts) {
     httpOk(`http://localhost:${env('MEMPOOL_WEB_PORT', '3000')}/api/blocks/tip/height`),
     { attempts: 60, intervalMs: 3000 },
   );
+
+  // EVM (Anvil) must be up — with contracts deployed — before boltz starts:
+  // BOLTZ_CONFIG bakes the deployed ERC20Swap/TBTC addresses in via ${EVM_*}
+  // interpolation at container-creation time, so this has to complete before
+  // the wave below (which brings up boltz) runs. Safe to call unconditionally
+  // when phased=false too — firstWave already started anvil in that case, and
+  // composeUp/setupEvm are idempotent to re-run.
+  if (active.has('evm')) {
+    await startAnvil();
+    await setupEvm();
+  }
 
   // Second wave: the rest of the closure, now that base is healthy. composeUp is
   // additive, so this only starts the app-layer containers.
