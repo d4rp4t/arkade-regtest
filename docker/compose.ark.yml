@@ -248,6 +248,23 @@ services:
         # to the plain L2 block number — Anvil doesn't populate that field.
         regtest = true
 
+        # Required, not optional, despite not being documented in docs/boltz.conf's
+        # commented-out Arbitrum example: ArbitrumConfig.l1Providers (dist/lib/Config.d.ts
+        # in the boltz/boltz:latest image) has no `?`. ArbitrumProvider's constructor
+        # (dist/lib/wallet/ethereum/ArbitrumProvider.js) builds a second, nested
+        # InjectedProvider for the L1 (Ethereum) side — since Arbitrum is an L2 — using
+        # `{ providers: config.l1Providers }`; that nested InjectedProvider's constructor
+        # throws NO_PROVIDER_SPECIFIED synchronously if l1Providers is undefined, which is
+        # exactly what was causing "Disabled Arbitrum integration because: no RPC provider
+        # was specified" (the failure was a pure config check, not a real connection
+        # attempt — hence firing within ~1ms of the previous log line). No real L1 node
+        # exists in this regtest stack; pointing it at the same Anvil instance just
+        # satisfies the constructor. l1Provider is only actually queried via
+        # getLocktimeHeight() for HTLC timelock checks — revisit if that turns out to
+        # matter functionally for the ARK<->TBTC swap path.
+        [[arbitrum.l1Providers]]
+        endpoint = "http://anvil:8545"
+
         [[arbitrum.contracts]]
         etherSwap = "${EVM_ETHERSWAP_ADDRESS}"
         erc20Swap = "${EVM_ERC20SWAP_ADDRESS}"

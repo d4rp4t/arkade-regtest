@@ -27,7 +27,7 @@ import { bitcoinCli, bootstrapChain, mine, faucet, reorg } from './lib/chain.mjs
 import { setupArkd, applyArkdFees } from './lib/setup/arkd.mjs';
 import { setupFulmine, setupDelegator } from './lib/setup/fulmine.mjs';
 import { setupBoltz } from './lib/setup/boltz.mjs';
-import { setupEvm } from './lib/setup/evm.mjs';
+import { setupEvm, fundBoltzEvmWalletFromLogs } from './lib/setup/evm.mjs';
 import { setupSolver } from './lib/setup/solver.mjs';
 import { createInvoice, payInvoice } from './lib/invoice.mjs';
 import { rotateSigner, setSigners, signerInfo, clearSignerState } from './lib/setup/signer.mjs';
@@ -278,6 +278,12 @@ async function start(opts) {
   if (active.has('ark')) await setupArkd();
   if (active.has('delegate')) await setupDelegator();
   if (active.has('boltz')) {
+    // Boltz has no config field for its EVM wallet address — it derives one
+    // from its own seed on first boot (logged at startup) and can't estimate
+    // gas for its ERC20Swap allowance approval until that address is funded,
+    // so it crash-loops until this runs. Must happen before setupBoltz()'s
+    // restart+verifyPairs cycle below, which needs boltz to actually stay up.
+    if (active.has('evm')) await fundBoltzEvmWalletFromLogs();
     await setupFulmine(); // boltz-fulmine lives in the boltz profile
     await setupBoltz();
   }
