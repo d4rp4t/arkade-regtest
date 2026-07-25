@@ -38,11 +38,12 @@ const PROFILE_DEPS = {
   base: [],
   ark: ['base'],
   delegate: ['ark'], // standalone fulmine-delegator
-  // boltz depends on evm (Anvil) too: BOLTZ_CONFIG's [arbitrum] block bakes in
-  // the deployed ERC20Swap/TBTC addresses via ${EVM_*} interpolation, so an
-  // ARK<->TBTC pair is always available whenever boltz is up — no separate
-  // "did you also remember --profile evm" footgun.
-  boltz: ['ark', 'evm'], // boltz + its own boltz-fulmine + boltz-lnd (independent of the delegator)
+  // boltz does NOT depend on evm: EVM support must stay opt-in. An EVM hiccup
+  // (Anvil slow to deploy, Boltz's derived wallet not fundable in time, etc.)
+  // must never be able to take down Boltz's Lightning/BTC/ARK pairs for jobs
+  // that have nothing to do with EVM — pass --profile boltz,evm explicitly
+  // when you actually want the ARK<->TBTC pair.
+  boltz: ['ark'], // boltz + its own boltz-fulmine + boltz-lnd (independent of the delegator)
   evm: [], // standalone Anvil node; usable on its own for isolated contract testing
   emulator: ['ark'],
   covclaimd: ['ark', 'emulator'], // non-interactive claim daemon; needs arkd + emulator
@@ -258,11 +259,13 @@ async function start(opts) {
   );
 
   // EVM (Anvil) must be up — with contracts deployed — before boltz starts:
-  // BOLTZ_CONFIG bakes the deployed ERC20Swap/TBTC addresses in via ${EVM_*}
-  // interpolation at container-creation time, so this has to complete before
-  // the wave below (which brings up boltz) runs. Safe to call unconditionally
-  // when phased=false too — firstWave already started anvil in that case, and
-  // composeUp/setupEvm are idempotent to re-run.
+  // setupEvm() sets ARBITRUM_CONFIG_TOML/ARK_TBTC_PAIR_TOML, which
+  // BOLTZ_CONFIG substitutes in at container-creation time, so this has to
+  // complete before the wave below (which brings up boltz) runs. Only when
+  // evm is explicitly requested — boltz alone must stay fully EVM-free (see
+  // PROFILE_DEPS.boltz). Safe to call unconditionally when phased=false too —
+  // firstWave already started anvil in that case, and composeUp/setupEvm are
+  // idempotent to re-run.
   if (active.has('evm')) {
     await startAnvil();
     await setupEvm();
