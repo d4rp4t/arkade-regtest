@@ -179,6 +179,10 @@ function banner(active) {
     lines.push(`  Anvil (EVM)     http://localhost:${env('ANVIL_PORT', '8545')}`);
     if (process.env.EVM_ERC20SWAP_ADDRESS) lines.push(`    ERC20Swap     ${process.env.EVM_ERC20SWAP_ADDRESS}`);
     if (process.env.EVM_TBTC_ADDRESS) lines.push(`    TBTC          ${process.env.EVM_TBTC_ADDRESS}`);
+    if (process.env.EVM_USDT_ADDRESS) lines.push(`    USDT          ${process.env.EVM_USDT_ADDRESS}`);
+    if (process.env.EVM_ROUTER_ADDRESS) lines.push(`    Router        ${process.env.EVM_ROUTER_ADDRESS}`);
+    if (process.env.EVM_PERMIT2_ADDRESS) lines.push(`    Permit2       ${process.env.EVM_PERMIT2_ADDRESS}`);
+    if (process.env.EVM_MOCK_DEX_ADDRESS) lines.push(`    MockERC20Dex  ${process.env.EVM_MOCK_DEX_ADDRESS}`);
   }
   if (active.has('emulator')) {
     lines.push(`  Emulator        http://localhost:${env('EMULATOR_PORT', '7073')}`);
